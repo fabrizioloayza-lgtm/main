@@ -331,24 +331,67 @@ with tab2:
 
 # --- TAB 3: Por Curso ---
 with tab3:
-    curso_sel = st.selectbox("Curso", ["(Todos)"] + list(sorted(df_f["Curso"].unique())))
-    df_cur = df_f if curso_sel=="(Todos)" else df_f[df_f["Curso"]==curso_sel]
+    st.subheader("Estado de ejecución de cursos")
 
-    rend = df_cur.assign(Tasa=lambda d: (d["Aprobados"]/d["Participantes"]*100).round(1))
-    fig6 = px.bar(rend.sort_values("Tasa", ascending=False),
-                  x="Curso", y="Tasa", color="Tasa",
-                  title="Tasa de aprobación por curso (%)",
-                  template=PLOTLY_TEMPLATE, color_continuous_scale=["#BAF2E1","#0FB981"])
-    fig6.update_layout(xaxis_title="", yaxis_title="%", xaxis_tickangle=-20, coloraxis_showscale=False)
-    st.plotly_chart(fig6, use_container_width=True)
+    # Controles
+    estados_disponibles = sorted(df_f["Estado"].dropna().unique())
+    estados_sel = st.multiselect("Mostrar estados", estados_disponibles, default=estados_disponibles)
+    q = st.text_input("Buscar (curso / empresa / docente)", "")
 
-    fig7 = px.scatter(df_cur, x="Horas", y="Participantes", size="Participantes", color="Empresa",
-                      hover_name="Curso", template=PLOTLY_TEMPLATE,
-                      title="Relación Horas vs Participantes")
-    st.plotly_chart(fig7, use_container_width=True)
+    # Datos base + tasa
+    df_tab = df_f.copy()
+    if "Participantes" in df_tab and "Aprobados" in df_tab:
+        df_tab["Tasa_%"] = (df_tab["Aprobados"] / df_tab["Participantes"] * 100).round(1).fillna(0)
 
-    st.subheader("Detalle")
-    st.dataframe(df_cur.sort_values(["Fecha_inicio","Empresa"]), use_container_width=True)
+    # Filtros
+    df_tab = df_tab[df_tab["Estado"].isin(estados_sel)]
+    if q:
+        qlow = q.lower()
+        df_tab = df_tab[
+            df_tab["Curso"].str.lower().str.contains(qlow, na=False) |
+            df_tab["Empresa"].str.lower().str.contains(qlow, na=False) |
+            df_tab["Docente"].str.lower().str.contains(qlow, na=False)
+        ]
+
+    # Orden y columnas visibles
+    cols = ["Empresa","Curso","Docente","Modalidad","Horas","Fecha","Estado",
+            "Participantes","Aprobados","Desaprobados","Tasa_%"]
+    cols = [c for c in cols if c in df_tab.columns]
+    df_show = df_tab[cols].sort_values(["Estado","Empresa","Curso"])
+
+    # Resumen rápido
+    cA, cB, cC = st.columns(3)
+    with cA: st.metric("Cursos (total)", df_show.shape[0])
+    with cB: st.metric("Ejecutados", int((df_show["Estado"]=="Ejecutado").sum()))
+    with cC: st.metric("En Proceso", int((df_show["Estado"].str.contains("Proceso", case=False, na=False)).sum()))
+
+    # Tabla interactiva (no editable) con formato
+    st.data_editor(
+        df_show,
+        use_container_width=True,
+        hide_index=True,
+        disabled=True,
+        column_config={
+            "Horas": st.column_config.NumberColumn("Horas", format="%d"),
+            "Participantes": st.column_config.NumberColumn("Participantes", format="%d"),
+            "Aprobados": st.column_config.NumberColumn("Aprobados", format="%d"),
+            "Desaprobados": st.column_config.NumberColumn("Desaprobados", format="%d"),
+            "Tasa_%": st.column_config.ProgressColumn(
+                "Tasa de aprobación",
+                help="Aprobados / Participantes",
+                format="%.1f%%",
+                min_value=0, max_value=100
+            ),
+        }
+    )
+
+    # Descarga del resultado filtrado
+    st.download_button(
+        "⬇️ Descargar tabla (CSV)",
+        df_show.to_csv(index=False).encode("utf-8-sig"),
+        "cursos_estado_ejecucion.csv",
+        "text/csv"
+    )
 
 # --- TAB 4: Calidad ---
 with tab4:
