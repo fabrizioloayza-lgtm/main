@@ -330,42 +330,78 @@ with tab2:
     st.dataframe(df_emp.sort_values(["Empresa","Fecha_inicio","Curso"]), use_container_width=True)
 
 # --- TAB 3: Por Curso ---
+# --- TAB 3: Por Curso  ->  Tabla interactiva + KPIs estáticos + filtro de estado ---
 with tab3:
-    st.subheader("Estado de ejecución de cursos")
+    # ===== KPIs ESTÁTICOS (calculados con df_f total, no dependen del selector de estado) =====
+    total_cursos_total   = df_f.shape[0]
+    ejecutados_total     = int(df_f["Estado"].astype(str).str.contains("Ejecutado", case=False, na=False).sum())
+    en_proceso_total     = int(df_f["Estado"].astype(str).str.contains("Proceso",   case=False, na=False).sum())
 
-    # Controles
-    estados_disponibles = sorted(df_f["Estado"].dropna().unique())
-    estados_sel = st.multiselect("Mostrar estados", estados_disponibles, default=estados_disponibles)
+    # Estilos de tarjetas
+    st.markdown("""
+    <style>
+    .stats-row{display:flex; gap:14px; margin:6px 0 14px 0; flex-wrap:wrap;}
+    .stat-card{
+        flex:1; min-width:220px; background:#FFFFFF; border:1px solid #E6E9EF;
+        border-radius:16px; padding:16px 18px; box-shadow:0 6px 18px rgba(15,23,42,.06);
+    }
+    .stat-label{font-size:13px; color:#64748B; margin-bottom:6px;}
+    .stat-value{font-size:28px; font-weight:900; color:#0F172A;}
+    .b-exec{border-color:#D1FAE5;}
+    .b-proc{border-color:#FDE68A;}
+    .b-total{border-color:#BFE8FA;}
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.subheader("Estado de ejecución de cursos")
+    st.markdown(f"""
+    <div class="stats-row">
+      <div class="stat-card b-total">
+        <div class="stat-label">Cursos (total)</div>
+        <div class="stat-value">{total_cursos_total}</div>
+      </div>
+      <div class="stat-card b-exec">
+        <div class="stat-label">Ejecutados</div>
+        <div class="stat-value">{ejecutados_total}</div>
+      </div>
+      <div class="stat-card b-proc">
+        <div class="stat-label">En Proceso</div>
+        <div class="stat-value">{en_proceso_total}</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ===== Controles de filtro/tabla =====
+    estado_opcion = st.selectbox("Mostrar estado", ["Todos", "En Proceso", "Ejecutado"], index=0)
     q = st.text_input("Buscar (curso / empresa / docente)", "")
 
-    # Datos base + tasa
+    # Base de datos para la tabla (parte dinámica)
     df_tab = df_f.copy()
     if "Participantes" in df_tab and "Aprobados" in df_tab:
         df_tab["Tasa_%"] = (df_tab["Aprobados"] / df_tab["Participantes"] * 100).round(1).fillna(0)
 
-    # Filtros
-    df_tab = df_tab[df_tab["Estado"].isin(estados_sel)]
+    # Filtro por estado (solo afecta a la tabla)
+    if estado_opcion == "En Proceso":
+        df_tab = df_tab[df_tab["Estado"].astype(str).str.contains("Proceso", case=False, na=False)]
+    elif estado_opcion == "Ejecutado":
+        df_tab = df_tab[df_tab["Estado"].astype(str).str.contains("Ejecutado", case=False, na=False)]
+
+    # Búsqueda
     if q:
         qlow = q.lower()
         df_tab = df_tab[
-            df_tab["Curso"].str.lower().str.contains(qlow, na=False) |
-            df_tab["Empresa"].str.lower().str.contains(qlow, na=False) |
-            df_tab["Docente"].str.lower().str.contains(qlow, na=False)
+            df_tab["Curso"].astype(str).str.lower().str.contains(qlow, na=False) |
+            df_tab["Empresa"].astype(str).str.lower().str.contains(qlow, na=False) |
+            df_tab["Docente"].astype(str).str.lower().str.contains(qlow, na=False)
         ]
 
-    # Orden y columnas visibles
+    # Columnas visibles y orden
     cols = ["Empresa","Curso","Docente","Modalidad","Horas","Fecha","Estado",
             "Participantes","Aprobados","Desaprobados","Tasa_%"]
     cols = [c for c in cols if c in df_tab.columns]
     df_show = df_tab[cols].sort_values(["Estado","Empresa","Curso"])
 
-    # Resumen rápido
-    cA, cB, cC = st.columns(3)
-    with cA: st.metric("Cursos (total)", df_show.shape[0])
-    with cB: st.metric("Ejecutados", int((df_show["Estado"]=="Ejecutado").sum()))
-    with cC: st.metric("En Proceso", int((df_show["Estado"].str.contains("Proceso", case=False, na=False)).sum()))
-
-    # Tabla interactiva (no editable) con formato
+    # Tabla interactiva (solo lectura)
     st.data_editor(
         df_show,
         use_container_width=True,
@@ -379,19 +415,19 @@ with tab3:
             "Tasa_%": st.column_config.ProgressColumn(
                 "Tasa de aprobación",
                 help="Aprobados / Participantes",
-                format="%.1f%%",
-                min_value=0, max_value=100
+                format="%.1f%%", min_value=0, max_value=100
             ),
         }
     )
 
-    # Descarga del resultado filtrado
+    # Descarga de la vista actual
     st.download_button(
         "⬇️ Descargar tabla (CSV)",
         df_show.to_csv(index=False).encode("utf-8-sig"),
         "cursos_estado_ejecucion.csv",
         "text/csv"
     )
+
 
 # --- TAB 4: Calidad ---
 with tab4:
