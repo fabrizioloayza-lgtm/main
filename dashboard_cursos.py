@@ -98,8 +98,8 @@ st.markdown(
           {"<img src='data:image/png;base64,"+logo_b64+"'/>" if logo_b64 else ""}
         </div>
         <div>
-          <h3 class="hero-title">Dashboard de Capacitación — TECSUP</h3>
-          <p class="hero-sub">Reporte ejecutivo con KPIs, calidad y desglose por empresa/curso. Fecha: {date.today().strftime('%d/%m/%Y')}</p>
+          <h3 class="hero-title">Dashboard Proyectos — TECSUP</h3>
+          <p class="hero-sub">Reporte por empresa/curso. Fecha: {date.today().strftime('%d/%m/%Y')}</p>
         </div>
       </div>
     </div>
@@ -137,7 +137,7 @@ def load_data():
     # Numéricos
     for col in ["Horas","Participantes","Aprobados","Desaprobados"]:
         if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
+            df[col] = pd.to_numeric(df[col], errors="coerce")
 
     # Fecha_inicio para filtros
     def parse_first_date(s):
@@ -185,7 +185,8 @@ df_f = df[
 # ===============================
 total_cursos = df_f["Curso"].nunique() if "Curso" in df_f.columns else 0
 total_part = int(df_f["Participantes"].sum()) if "Participantes" in df_f.columns else 0
-tasa_aprob = (df_f["Aprobados"].sum()/df_f["Participantes"].sum()*100) if total_part>0 else 0
+df_valid_ap = df_f[df_f["Aprobados"].notna() & df_f["Participantes"].notna() & (df_f["Participantes"] > 0)]
+tasa_aprob = (df_valid_ap["Aprobados"].sum() / df_valid_ap["Participantes"].sum() * 100) if len(df_valid_ap) > 0 else 0
 horas_tot = int(df_f["Horas"].sum()) if "Horas" in df_f.columns else 0
 
 k1,k2,k3,k4 = st.columns(4)
@@ -329,7 +330,6 @@ with tab2:
     st.subheader("Detalle")
     st.dataframe(df_emp.sort_values(["Empresa","Fecha_inicio","Curso"]), use_container_width=True)
 
-# --- TAB 3: Por Curso ---
 # --- TAB 3: Por Curso  ->  Tabla interactiva + KPIs estáticos + filtro de estado ---
 with tab3:
     # ===== KPIs ESTÁTICOS (calculados con df_f total, no dependen del selector de estado) =====
@@ -432,48 +432,99 @@ with tab3:
 # --- TAB 4: Calidad ---
 with tab4:
     st.caption("Las encuestas con ‘-%’ no reportan dato; se excluyen del promedio.")
+
+    # ---- Helpers
     def pct_to_num(x):
-        try: return float(str(x).replace("%",""))
-        except: return None
+        try:
+            return float(str(x).replace("%", ""))
+        except:
+            return None
+
     df_q = df_f.copy()
     df_q["Encuestas_num"] = df_q["Encuestas"].apply(pct_to_num)
 
+    # Promedio general (solo válidos)
     prom_general = df_q["Encuestas_num"].dropna().mean()
+    val = round(prom_general if pd.notnull(prom_general) else 0, 1)
+    val_clamped = max(min(val, 100), 0)
+
     colQ1, colQ2 = st.columns(2, gap="large")
 
+    # ====== Radial (MISMO ESTILO ANTERIOR) con número centrado ======
     with colQ1:
-        val = prom_general if pd.notnull(prom_general) else 0
-        fig_ind = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=val,
-            number={'suffix': "%", 'valueformat': ".1f"},
-            gauge={
-                'axis': {'range': [0, 100]},
-                'bar': {'color': COLOR_PRIMARIO},
-                'steps': [
-                    {'range': [0, 70], 'color': '#FEE2E2'},
-                    {'range': [70, 85], 'color': '#FEF3C7'},
-                    {'range': [85, 100], 'color': '#DCFCE7'}
-                ],
-                'threshold': {'line': {'color': COLOR_OK, 'width': 4}, 'thickness': .75, 'value': 85}
-            }
-        ))
-        fig_ind.update_layout(title="Satisfacción promedio (encuestas)", template=PLOTLY_TEMPLATE, height=300)
-        st.plotly_chart(fig_ind, use_container_width=True)
+        # Donut 0..100 con annotation centrada (no cambia con el tamaño de pantalla)
+        fig_radial = go.Figure(
+            data=[
+                go.Pie(
+                    values=[val_clamped, 100 - val_clamped],
+                    hole=0.72,              # mantener look & feel anterior (ajusta si usabas otro)
+                    sort=False,
+                    direction="clockwise",
+                    marker=dict(colors=[COLOR_PRIMARIO, "#EEF2F7"]),
+                    textinfo="none",
+                    hovertemplate="%{value:.1f}%<extra></extra>"
+                )
+            ]
+        )
+        fig_radial.update_layout(
+            title="Satisfacción promedio (encuestas)",
+            annotations=[
+                dict(
+                    text=f"{val:.1f}%",
+                    x=0.5, y=0.5,
+                    xanchor="center", yanchor="middle",
+                    showarrow=False,
+                    font=dict(size=44, family="Inter, Arial", color="#0F172A"),
+                )
+            ],
+            showlegend=False,
+            margin=dict(t=60, b=0, l=0, r=0),
+            template=PLOTLY_TEMPLATE,
+        )
+        st.plotly_chart(fig_radial, use_container_width=True)
 
+    # ====== NUEVO Radial: cantidad de encuestas por empresa ======
     with colQ2:
-        q_emp = (df_q.dropna(subset=["Encuestas_num"])
-                 .groupby("Empresa")["Encuestas_num"].mean().reset_index())
-        if not q_emp.empty:
-            fig_q = px.bar(q_emp.sort_values("Encuestas_num", ascending=False),
-                           x="Empresa", y="Encuestas_num",
-                           title="Encuesta promedio por empresa",
-                           template=PLOTLY_TEMPLATE, color="Encuestas_num",
-                           color_continuous_scale=["#D1FAE5","#10B981"])
-            fig_q.update_layout(xaxis_title="", yaxis_title="%", coloraxis_showscale=False)
-            st.plotly_chart(fig_q, use_container_width=True)
+        # Conteo por empresa (filas con Encuestas no nulas)
+        cnt = (
+            df_q.dropna(subset=["Encuestas"])
+               .groupby("Empresa", dropna=True)
+               .size()
+               .reset_index(name="Cantidad")
+        )
+
+        if not cnt.empty:
+            total_enc = int(cnt["Cantidad"].sum())
+            # Donut de participación por empresa
+            fig_cnt = go.Figure(
+                data=[
+                    go.Pie(
+                        labels=cnt["Empresa"],
+                        values=cnt["Cantidad"],
+                        hole=0.6,   # radial tipo donut
+                        textinfo="percent",
+                        hovertemplate="<b>%{label}</b><br>Encuestas: %{value}<extra></extra>",
+                    )
+                ]
+            )
+            fig_cnt.update_layout(
+                title="Distribución de encuestas por empresa",
+                annotations=[
+                    dict(
+                        text=f"Total<br>{total_enc}",
+                        x=0.5, y=0.5,
+                        xanchor="center", yanchor="middle",
+                        showarrow=False,
+                        font=dict(size=20, family="Inter, Arial", color="#0F172A"),
+                    )
+                ],
+                showlegend=True,
+                margin=dict(t=60, b=0, l=0, r=0),
+                template=PLOTLY_TEMPLATE,
+            )
+            st.plotly_chart(fig_cnt, use_container_width=True)
         else:
-            st.info("No hay datos válidos de encuestas en el filtro actual.")
+            st.info("No hay encuestas registradas por empresa en el filtro actual.")
 
 # ===============================
 # DESCARGA
