@@ -207,7 +207,7 @@ st.markdown("---")
 # ===============================
 # TABS
 # ===============================
-tab1, tab2, tab3, tab4 = st.tabs(["🔎 Resumen", "🏢 Por Empresa", "📚 Por Curso", "🧪 Calidad"])
+tab1, tab2, tab3, tab4 = st.tabs(["Resumen", "Por Empresa", "Por Curso", "Encuestas"])
 
 # --- TAB 1: Resumen ---
 with tab1:
